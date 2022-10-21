@@ -1,15 +1,14 @@
 {
   "output_format": {
-    "destination": "csv",
-    "filename": "users.csv"
+    "destination": "csv"
   },
   "collections": [
     {
       "name": "person",
-      "size": 1000,
+      "size": 100,
       "attributes": [
         {
-          "name": "pin",
+          "name": "uid",
           "attribute_type": "expression",
           "value": "[1-9]{6}"
         },
@@ -24,6 +23,18 @@
           "value": "names.first_name"
         },
         {
+          "name": "area_code",
+          "attribute_type": "distribution_set",
+          "population": "area_distribution.areacode",
+          "weights": "areacodes.weights"
+        },
+        {
+          "name": "attending",
+          "attribute_type": "distribution_set",
+          "population": "area_distribution.attending",
+          "weights": "areacodes.weights"
+        },
+        {
           "name": "last_name",
           "attribute_type": "lookup",
           "value": "names.last_name"
@@ -34,7 +45,7 @@
           "value": "[1-8]{1}[0-9]{2}[\\-]{1}[0-9]{2}[\\-]{1}[0-9]{4}"
         },
         {
-          "name": "age",
+          "name": "birth_date",
           "attribute_type": "expression",
           "value": "[1-8]{1}[0-9]{1}"
         },
@@ -42,6 +53,37 @@
           "name": "phone_no",
           "attribute_type": "expression",
           "value": "[5]{1}[8]{1}[5]{1}[\\-]{1}[0-9]{3}[(]{1}[0-9]{4}[)]{1}"
+        }
+      ]
+    },
+    {
+      "name": "players",
+      "size": 1000,
+      "attributes": [
+        {
+          "name": "player_id",
+          "attribute_type": "sequence",
+          "value": "200000"
+        },
+        {
+          "name": "season",
+          "attribute_type": "range",
+          "value": "1933-2021"
+        },
+        {
+          "name": "rating",
+          "attribute_type": "range",
+          "value": "60-99"
+        },
+        {
+          "name": "jersey",
+          "attribute_type": "range",
+          "value": "0-99"
+        },
+        {
+          "name": "position",
+          "attribute_type": "lookup",
+          "value": "positions.position"
         }
       ]
     }

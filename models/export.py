@@ -4,10 +4,12 @@ from typing import List
 
 
 class Attribute:
-    def __init__(self, name: str, attribute_type: str, value: str):
+    def __init__(self, name: str, attribute_type: str, value: str = None, population: str = None, weights: str = None):
         self.name = name
         self.attribute_type = attribute_type
         self.value = value
+        self.population = population
+        self.weights = weights
 
     def to_json(self):
         return json.dumps(self.__dict__, default=lambda o: o.__dict__, indent=4)
@@ -24,9 +26,8 @@ class Collection:
 
 
 class OutputFormat:
-    def __init__(self, destination: str, filename: str):
+    def __init__(self, destination: str):
         self.destination = destination
-        self.filename = filename
 
     def to_json(self):
         return json.dumps(self.__dict__, default=lambda o: o.__dict__, indent=4)

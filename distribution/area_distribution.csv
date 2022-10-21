@@ -1,0 +1,5 @@
+﻿areacode,attending,weights
+716,y,0.5
+716,n,0.1
+585,y,0.05
+585,n,0.35
