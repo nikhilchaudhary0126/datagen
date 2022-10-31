@@ -2,17 +2,29 @@ import json
 import random
 from random import choices
 import re
-from collections import defaultdict
+from numpy import random as nprandom
 
-from export import Export, OutputFormat, Attribute, Collection
+from datagen.attributes import Attribute, RandomSequence, DateRange
+from datagen.distributions import Distribution, NormalDistribution, ProbabilityDistribution, PoissonDistribution, \
+    BinomialDistribution, ExponentialDistribution, LogisticDistribution, MixedProbabilityDistribution
+from datagen.models import Export, Collection, FlatFileOutputFormat, MySqlOutputFormat, Expression, Lookup, Sequence, \
+    Range
 import pandas as pd
 
 from enum import Enum
 
 
+class AttributeTypes(Enum):
+    EXPRESSION = 'expression'
+    DISTRIBUTION = 'distribution'
+    DISTRIBUTION_SET = 'distribution_set'
+    SEQUENCE = 'sequence'
+    RANDOM_SEQUENCE = 'random sequence'
+    RANGE = 'range'
+
+
 class Constants(Enum):
     OUTPUT_FORMAT = 'output_format'
-    DESTINATION = 'destination'
     COLLECTION = 'collections'
     COLLECTION_NAME = 'name'
     COLLECTION_SIZE = 'size'
@@ -31,6 +43,20 @@ class Constants(Enum):
     RANGE = 'range'
 
 
+class OutputTypes(Enum):
+    CSV = "csv"
+    MYSQL = "mysql"
+
+
+class OutputTypeParameters(Enum):
+    TYPE = "type"
+    PATH = "PATH"
+    USERNAME = "username"
+    PASSWORD = "password"
+    HOST = "host"
+    DATABASE = "database"
+
+
 def read_file(filename: str) -> Export:
     with open(filename, "r") as file:
         input_json_string = ""
@@ -41,7 +67,14 @@ def read_file(filename: str) -> Export:
 
 def read_string(json_map: str) -> Export:
     json_map = json.loads(json_map)
-    output_format = OutputFormat(json_map[Constants.OUTPUT_FORMAT.value][Constants.DESTINATION.value])
+    if json_map[Constants.OUTPUT_FORMAT.value][OutputTypeParameters.TYPE.value] == OutputTypes.CSV.value:
+        output_format = FlatFileOutputFormat(json_map[Constants.OUTPUT_FORMAT.value][OutputTypeParameters.PATH.value])
+    else:
+        output_format = MySqlOutputFormat(json_map[Constants.OUTPUT_FORMAT.value][OutputTypeParameters.USERNAME.value],
+                                          json_map[Constants.OUTPUT_FORMAT.value][OutputTypeParameters.PASSWORD.value],
+                                          json_map[Constants.OUTPUT_FORMAT.value][OutputTypeParameters.HOST.value],
+                                          json_map[Constants.OUTPUT_FORMAT.value][OutputTypeParameters.DATABASE.value])
+
     collections = []
     for json_collection in json_map[Constants.COLLECTION.value]:
         collection_name = json_collection[Constants.COLLECTION_NAME.value]
@@ -63,43 +96,46 @@ def read_string(json_map: str) -> Export:
     return Export(output_format, collections)
 
 
-def generate(export_job: Export):
+def generate(export_job: Export, dataset_path: str):
     for collection in export_job.collections:
-
-        df = pd.DataFrame(columns=[attribute.name for attribute in collection.attributes])
-        distribution = defaultdict(lambda: [])
+        df = pd.DataFrame(columns=collection.get_attribute_names())
         for i in range(len(collection.attributes)):
             attribute = collection.attributes[i]
-            match attribute.attribute_type:
-                case Constants.EXPRESSION.value:
-                    df[collection.attributes[i].name] = create_expression(attribute.value, collection.size)
-                case Constants.LOOKUP.value:
-                    df[collection.attributes[i].name] = create_lookup(attribute.value, collection.size)
-                case Constants.DISTRIBUTION.value:
-                    df[collection.attributes[i].name] = create_distribution(attribute.population, attribute.weights,
-                                                                            collection.size)
-                case Constants.DISTRIBUTION_SET.value:
-                    distribution[attribute.weights].append([attribute.name, attribute.population])
-                case Constants.SEQUENCE.value:
-                    sequence_start = int(attribute.value)
-                    df[collection.attributes[i].name] = [x for x in
-                                                         range(sequence_start, sequence_start + collection.size)]
-                case Constants.RANDOM_SEQUENCE.value:
-                    sequence_start = int(attribute.value)
-                    random_list = [x for x in range(sequence_start, sequence_start + collection.size)]
-                    random.shuffle(random_list)
-                    df[collection.attributes[i].name] = random_list
-                case Constants.RANGE.value:
-                    range_start, range_end = int(attribute.value.split("-")[0]), int(attribute.value.split("-")[1])
-                    df[collection.attributes[i].name] = [random.randint(range_start, range_end) for _ in
-                                                         range(collection.size)]
+            if isinstance(attribute, Expression):
+                df[collection.attributes[i].name] = create_expression(attribute.expression, collection.size)
+            elif isinstance(attribute, Lookup):
+                df[collection.attributes[i].name] = create_lookup(attribute.lookup_column, dataset_path,
+                                                                  collection.size)
+            elif isinstance(attribute, Distribution):
+                df[collection.attributes[i].name] = create_distribution(attribute, collection.size)
+            elif isinstance(attribute, MixedProbabilityDistribution):
+                sub_df = create_distribution_set(attribute, collection.size)
+                df = df.assign(**sub_df).fillna(df)
+            elif isinstance(attribute, Sequence):
+                sequence_start = attribute.start
+                df[collection.attributes[i].name] = [x for x in range(sequence_start, sequence_start + collection.size)]
+            elif isinstance(attribute, RandomSequence):
+                sequence_start = attribute.start
+                random_list = [x for x in range(sequence_start, sequence_start + collection.size)]
+                random.shuffle(random_list)
+                df[collection.attributes[i].name] = random_list
+            elif isinstance(attribute, Range):
+                df[collection.attributes[i].name] = [random.randint(attribute.start, attribute.end) for _ in
+                                                     range(collection.size)]
+            elif isinstance(attribute, DateRange):
+                df[collection.attributes[i].name] = [+ (attribute.end_date - attribute.start_date) * random.random() for
+                                                     _ in range(collection.size)]
 
-        if len(distribution) != 0:
-            sub_df = create_distribution_set(distribution, collection.size)
-            df = df.assign(**sub_df).fillna(df)
-        if export_job.output_format.destination == "csv":
-            df.to_csv("exports/" + collection.name, index=False)
-
+        if isinstance(export_job.output_format, FlatFileOutputFormat):
+            df.to_csv(export_job.output_format.path + collection.name + ".csv", index=False)
+        elif isinstance(export_job.output_format, MySqlOutputFormat):
+            import sqlalchemy
+            database_connection = sqlalchemy.create_engine('mysql+mysqlconnector://{0}:{1}@{2}/{3}'.
+                                                           format(export_job.output_format.username,
+                                                                  export_job.output_format.password,
+                                                                  export_job.output_format.host,
+                                                                  export_job.output_format.database))
+            df.to_sql(con=database_connection, name=collection.name, if_exists='replace')
     return "Finished Export"
 
 
@@ -175,11 +211,11 @@ def create_expression(input_str, size):
     return result_col
 
 
-def create_lookup(dataset, size):
+def create_lookup(dataset, dataset_path, size):
     table = dataset.split(".")[0]
     column = dataset.split(".")[1]
 
-    df = pd.read_csv("datasets/" + table + ".csv")
+    df = pd.read_csv(dataset_path + table + ".csv")
     result_col = []
     for _ in range(size):
         record = random.randint(0, df.shape[0] - 1)
@@ -187,32 +223,46 @@ def create_lookup(dataset, size):
     return result_col
 
 
-def create_distribution(population_file, weights_file, size) -> list:
+def create_distribution(attribute: Attribute, size: int):
+    if isinstance(attribute, NormalDistribution):
+        return nprandom.normal(loc=attribute.mean, scale=attribute.standard_deviation, size=size)
+    elif isinstance(attribute, LogisticDistribution):
+        return nprandom.logistic(loc=attribute.mean, scale=attribute.standard_deviation, size=size)
+    elif isinstance(attribute, ExponentialDistribution):
+        return nprandom.exponential(scale=attribute.scale, size=size)
+    elif isinstance(attribute, BinomialDistribution):
+        return nprandom.binomial(n=attribute.total_trials, p=attribute.probability, size=size)
+    elif isinstance(attribute, PoissonDistribution):
+        return nprandom.poisson(lam=attribute.event_rate, size=size)
+    elif isinstance(attribute, ProbabilityDistribution):
+        create_probability_distribution(attribute.path, attribute.events_file, attribute.weights_file, size)
+
+
+def create_probability_distribution(distribution_path, population_file, weights_file, size) -> list:
     population_filename = population_file.split(".")[0]
     weights_filename = weights_file.split(".")[0]
     population_col = population_file.split(".")[1]
     weights_col = weights_file.split(".")[1]
 
-    population = pd.read_csv("distribution/" + population_filename + ".csv")[population_col].values.tolist()
-    weights = pd.read_csv("distribution/" + weights_filename + ".csv")[weights_col].values.tolist()
+    population = pd.read_csv(distribution_path + population_filename + ".csv")[population_col].values.tolist()
+    weights = pd.read_csv(distribution_path + weights_filename + ".csv")[weights_col].values.tolist()
 
     samples = choices(population, weights, k=size)
     return samples
 
 
-def create_distribution_set(distribution, size):
+def create_distribution_set(attribute: MixedProbabilityDistribution, size: int):
     res = pd.DataFrame()
-    for weight, distribution_list in distribution.items():
-        weights_filename = weight.split(".")[0]
-        weights_col = weight.split(".")[1]
-        weights = pd.read_csv("distribution/" + weights_filename + ".csv")[weights_col].values.tolist()
-        samples = choices(list(range(0, len(weights))), weights, k=size)
-        for distribution in distribution_list:
-            population_filename = distribution[1].split(".")[0]
-            population_col = distribution[1].split(".")[1]
-            population = pd.read_csv("distribution/" + population_filename + ".csv")[population_col].values.tolist()
-            sample = []
-            for value in samples:
-                sample.append(population[value])
-            res[distribution[0]] = sample
+    weights_filename = attribute.weights_file.split(".")[0]
+    weights_col = attribute.weights_file.split(".")[1]
+    weights = pd.read_csv(attribute.path + weights_filename + ".csv")[weights_col].values.tolist()
+    samples = choices(list(range(0, len(weights))), weights, k=size)
+    for i in range(len(attribute.events_files)):
+        population_filename = attribute.events_files[i].split(".")[0]
+        population_col = attribute.events_files[i].split(".")[1]
+        population = pd.read_csv(attribute.path + population_filename + ".csv")[population_col].values.tolist()
+        sample = []
+        for value in samples:
+            sample.append(population[value])
+        res[attribute.names[i]] = sample
     return res
