@@ -4,7 +4,7 @@ from random import choices
 import re
 from collections import defaultdict
 
-from models.export import Export, OutputFormat, Attribute, Collection
+from export import Export, OutputFormat, Attribute, Collection
 import pandas as pd
 
 from enum import Enum
