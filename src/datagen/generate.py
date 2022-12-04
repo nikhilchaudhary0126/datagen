@@ -1,5 +1,6 @@
 import json
 import random
+from collections import defaultdict
 from random import choices
 import re
 from numpy import random as nprandom
@@ -7,8 +8,8 @@ from numpy import random as nprandom
 from datagen.attributes import Attribute, RandomSequence, DateRange
 from datagen.distributions import Distribution, NormalDistribution, ProbabilityDistribution, PoissonDistribution, \
     BinomialDistribution, ExponentialDistribution, LogisticDistribution, MixedProbabilityDistribution
-from datagen.models import Export, Collection, FlatFileOutputFormat, MySqlOutputFormat, Expression, Lookup, Sequence, \
-    Range
+from datagen.models import Export, Collection, CsvFileOutputFormat, MySqlOutputFormat, Expression, Lookup, Sequence, \
+    Range, MongoDBOutputFormat
 import pandas as pd
 
 from enum import Enum
@@ -57,6 +58,12 @@ class OutputTypeParameters(Enum):
     DATABASE = "database"
 
 
+class Cardinality(Enum):
+    ONE_TO_ONE = "One-to-One"
+    MANY_TO_ONE = "Many-To-One"
+    MANY_TO_MANY = "Many-To-Many"
+
+
 def read_file(filename: str) -> Export:
     with open(filename, "r") as file:
         input_json_string = ""
@@ -68,7 +75,7 @@ def read_file(filename: str) -> Export:
 def read_string(json_map: str) -> Export:
     json_map = json.loads(json_map)
     if json_map[Constants.OUTPUT_FORMAT.value][OutputTypeParameters.TYPE.value] == OutputTypes.CSV.value:
-        output_format = FlatFileOutputFormat(json_map[Constants.OUTPUT_FORMAT.value][OutputTypeParameters.PATH.value])
+        output_format = CsvFileOutputFormat(json_map[Constants.OUTPUT_FORMAT.value][OutputTypeParameters.PATH.value])
     else:
         output_format = MySqlOutputFormat(json_map[Constants.OUTPUT_FORMAT.value][OutputTypeParameters.USERNAME.value],
                                           json_map[Constants.OUTPUT_FORMAT.value][OutputTypeParameters.PASSWORD.value],
@@ -97,6 +104,7 @@ def read_string(json_map: str) -> Export:
 
 
 def generate(export_job: Export, dataset_path: str):
+    constraints = defaultdict(lambda: [])
     for collection in export_job.collections:
         df = pd.DataFrame(columns=collection.get_attribute_names())
         for i in range(len(collection.attributes)):
@@ -126,7 +134,15 @@ def generate(export_job: Export, dataset_path: str):
                 df[collection.attributes[i].name] = [+ (attribute.end_date - attribute.start_date) * random.random() for
                                                      _ in range(collection.size)]
 
-        if isinstance(export_job.output_format, FlatFileOutputFormat):
+        # for constraint in collection.constraints:
+        #     if constraint.cardinality == Cardinality.ONE_TO_ONE:
+        #         pass
+        #     elif constraint.cardinality == Cardinality.MANY_TO_ONE:
+        #         pass
+        #     elif constraint.cardinality == Cardinality.MANY_TO_MANY:
+        #         pass
+
+        if isinstance(export_job.output_format, CsvFileOutputFormat):
             df.to_csv(export_job.output_format.path + collection.name + ".csv", index=False)
         elif isinstance(export_job.output_format, MySqlOutputFormat):
             import sqlalchemy
@@ -136,6 +152,12 @@ def generate(export_job: Export, dataset_path: str):
                                                                   export_job.output_format.host,
                                                                   export_job.output_format.database))
             df.to_sql(con=database_connection, name=collection.name, if_exists='replace')
+        elif isinstance(export_job.output_format, MongoDBOutputFormat):
+            from pymongo import MongoClient
+            client = MongoClient(export_job.output_format.host, export_job.output_format.port)
+            db = client[export_job.output_format.database]
+            mycol = db[collection.name]
+            mycol.insert_many(df.to_dict('records'))
     return "Finished Export"
 
 

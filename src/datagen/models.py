@@ -1,15 +1,20 @@
+from __future__ import annotations
+
 import json
 from datetime import datetime
 
-from datagen.attributes import Expression, Lookup, Range, Sequence, DateRange
+from datagen.attributes import Expression, Lookup, Range, Sequence, DateRange, Attribute
 from datagen.distributions import Distribution, MixedProbabilityDistribution
+
+
+# from datagen.generate import Cardinality
 
 
 class Collection:
     def __init__(self, name: str, size: int):
         self.name = name
         self.size = size
-        self.attributes = []
+        self.attributes: list[Attribute] = []
 
     def to_json(self):
         return json.dumps(self.__dict__, default=lambda o: o.__dict__, indent=4)
@@ -33,6 +38,9 @@ class Collection:
         self.attributes.append(
             DateRange(name, datetime.strptime(start_date, date_format), datetime.strptime(end_date, date_format)))
 
+    def add_constraint(self, collection: 'Collection'):
+        self.constraints.append(collection)
+
     def get_attribute_names(self):
         names = []
         for attribute in self.attributes:
@@ -43,12 +51,19 @@ class Collection:
         return names
 
 
-class FlatFileOutputFormat:
+class CsvFileOutputFormat:
     def __init__(self, path: str):
         self.path = path
 
     def to_json(self):
         return json.dumps(self.__dict__, default=lambda o: o.__dict__, indent=4)
+
+
+class MongoDBOutputFormat:
+    def __init__(self, host: str, port: int, database: str):
+        self.host = host
+        self.port = port
+        self.database = database
 
 
 class MySqlOutputFormat:
@@ -63,7 +78,8 @@ class MySqlOutputFormat:
 
 
 class Export:
-    def __init__(self, output_format: MySqlOutputFormat | FlatFileOutputFormat, collections: list[Collection]):
+    def __init__(self, output_format: MySqlOutputFormat | CsvFileOutputFormat | MongoDBOutputFormat,
+                 collections: list[Collection]):
         self.output_format = output_format
         self.collections = collections
 
